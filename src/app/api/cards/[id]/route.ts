@@ -7,6 +7,13 @@ import type { ExtractedContact } from "@/lib/types";
 const uuidRegex =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+const labeledValueSchema = z.object({
+  label: z.string().optional().nullable(),
+  value: z.string(),
+});
+
+const contactValueSchema = z.union([z.string(), labeledValueSchema]);
+
 const patchSchema = z.object({
   extracted_json: z
     .object({
@@ -14,9 +21,10 @@ const patchSchema = z.object({
       company: z.string().optional().nullable(),
       title: z.string().optional().nullable(),
       emails: z.array(z.string()).optional().nullable(),
-      phones: z.array(z.string()).optional().nullable(),
+      phones: z.array(contactValueSchema).optional().nullable(),
+      faxes: z.array(contactValueSchema).optional().nullable(),
       websites: z.array(z.string()).optional().nullable(),
-      address: z.string().optional().nullable(),
+      address: z.union([z.string(), z.array(contactValueSchema)]).optional().nullable(),
       notes: z.string().optional().nullable(),
       raw_text: z.string().optional().nullable(),
     })

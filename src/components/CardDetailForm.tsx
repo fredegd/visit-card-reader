@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import DeleteCardButton from "@/components/DeleteCardButton";
-import type { ExtractedContact } from "@/lib/types";
+import type { ContactValue, ExtractedContact, LabeledValue } from "@/lib/types";
+import { toLabeledList } from "@/lib/extract/contact";
 
 export default function CardDetailForm({
   cardId,
@@ -15,6 +16,9 @@ export default function CardDetailForm({
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">(
     "idle",
   );
+  const [rerunStatus, setRerunStatus] = useState<"idle" | "running" | "error">(
+    "idle",
+  );
 
   const updateField = (key: keyof ExtractedContact, value: string) => {
     setForm((prev) => ({
@@ -23,13 +27,58 @@ export default function CardDetailForm({
     }));
   };
 
-  const updateList = (key: "emails" | "phones" | "websites", value: string) => {
+  const updateList = (key: "emails" | "websites", value: string) => {
     setForm((prev) => ({
       ...prev,
       [key]: value
         .split(",")
         .map((entry) => entry.trim())
         .filter(Boolean),
+    }));
+  };
+
+  const parseLabeled = (value: string): LabeledValue[] => {
+    return value
+      .split(/\r?\n|,/)
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .map((entry) => {
+        const [label, ...rest] = entry.split(":");
+        if (rest.length === 0) {
+          return { value: label.trim() };
+        }
+        return { label: label.trim() || undefined, value: rest.join(":").trim() };
+      });
+  };
+
+  const serializeLabeled = (values: LabeledValue[]) => {
+    return values
+      .map((item) => (item.label ? `${item.label}: ${item.value}` : item.value))
+      .join("\n");
+  };
+
+  const updatePhones = (value: string) => {
+    setForm((prev) => ({
+      ...prev,
+      phones: parseLabeled(value),
+    }));
+  };
+
+  const updateFaxes = (value: string) => {
+    setForm((prev) => ({
+      ...prev,
+      faxes: parseLabeled(value),
+    }));
+  };
+
+  const updateAddress = (value: string) => {
+    const lines = value
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    setForm((prev) => ({
+      ...prev,
+      address: parseLabeled(lines.join("\n")),
     }));
   };
 
@@ -51,6 +100,28 @@ export default function CardDetailForm({
       setTimeout(() => setStatus("idle"), 2000);
     } catch {
       setStatus("error");
+    }
+  };
+
+  const handleRerun = async () => {
+    if (!confirm("Re-run OCR on this card?")) return;
+    setRerunStatus("running");
+    try {
+      const response = await fetch(`/api/cards/${cardId}/process`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ qr: { front: null, back: null } }),
+      });
+
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || "Unable to re-run OCR.");
+      }
+
+      setRerunStatus("idle");
+      window.location.reload();
+    } catch {
+      setRerunStatus("error");
     }
   };
 
@@ -120,10 +191,18 @@ export default function CardDetailForm({
         </label>
         <label className="grid gap-1 text-sm">
           Phone(s)
-          <input
-            value={form.phones?.join(", ") ?? ""}
-            onChange={(event) => updateList("phones", event.target.value)}
-            className="rounded-xl border border-ink-200/70 bg-sand-50 px-3 py-2"
+          <textarea
+            value={serializeLabeled(toLabeledList(form.phones))}
+            onChange={(event) => updatePhones(event.target.value)}
+            className="min-h-[90px] rounded-xl border border-ink-200/70 bg-sand-50 px-3 py-2"
+          />
+        </label>
+        <label className="grid gap-1 text-sm">
+          Fax(es)
+          <textarea
+            value={serializeLabeled(toLabeledList(form.faxes))}
+            onChange={(event) => updateFaxes(event.target.value)}
+            className="min-h-[90px] rounded-xl border border-ink-200/70 bg-sand-50 px-3 py-2"
           />
         </label>
         <label className="grid gap-1 text-sm">
@@ -136,10 +215,10 @@ export default function CardDetailForm({
         </label>
         <label className="grid gap-1 text-sm md:col-span-2">
           Address
-          <input
-            value={form.address ?? ""}
-            onChange={(event) => updateField("address", event.target.value)}
-            className="rounded-xl border border-ink-200/70 bg-sand-50 px-3 py-2"
+          <textarea
+            value={serializeLabeled(toLabeledList(form.address))}
+            onChange={(event) => updateAddress(event.target.value)}
+            className="min-h-[90px] rounded-xl border border-ink-200/70 bg-sand-50 px-3 py-2"
           />
         </label>
         <label className="grid gap-1 text-sm md:col-span-2">
@@ -161,12 +240,23 @@ export default function CardDetailForm({
         >
           {status === "saving" ? "Saving..." : "Save changes"}
         </button>
+        <button
+          type="button"
+          onClick={handleRerun}
+          className="rounded-full border border-ink-200/70 px-5 py-2 text-sm font-semibold text-ink-700"
+          disabled={rerunStatus === "running"}
+        >
+          {rerunStatus === "running" ? "Re-running..." : "Re-run OCR"}
+        </button>
         <DeleteCardButton cardId={cardId} />
         {status === "saved" ? (
           <span className="text-xs text-emerald-600">Saved</span>
         ) : null}
         {status === "error" ? (
           <span className="text-xs text-rose-600">Save failed</span>
+        ) : null}
+        {rerunStatus === "error" ? (
+          <span className="text-xs text-rose-600">Re-run failed</span>
         ) : null}
       </div>
     </div>

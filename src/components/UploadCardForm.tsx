@@ -13,6 +13,7 @@ type UploadFile = {
 
 const uuidRegex =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MAX_PROCESSING_BYTES = 8 * 1024 * 1024;
 
 type ImageMeta = {
   storage_path: string;
@@ -28,14 +29,21 @@ type ImageMeta = {
 
 type PreparedImage = ImageMeta & { qr_text?: string | null };
 
+function getWebCrypto(): Crypto | null {
+  if (typeof globalThis === "undefined") return null;
+  return (globalThis as { crypto?: Crypto }).crypto ?? null;
+}
+
 function randomId() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
+  const webCrypto = getWebCrypto();
+
+  if (webCrypto?.randomUUID) {
+    return webCrypto.randomUUID();
   }
 
-  if (typeof crypto !== "undefined" && "getRandomValues" in crypto) {
+  if (webCrypto?.getRandomValues) {
     const bytes = new Uint8Array(16);
-    crypto.getRandomValues(bytes);
+    webCrypto.getRandomValues(bytes);
     // RFC4122 v4
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
@@ -49,16 +57,26 @@ function randomId() {
 async function getImageSize(file: File): Promise<{ width: number; height: number } | null> {
   return new Promise((resolve) => {
     const img = new Image();
-    img.onload = () => resolve({ width: img.width, height: img.height });
-    img.onerror = () => resolve(null);
-    img.src = URL.createObjectURL(file);
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve({ width: img.width, height: img.height });
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(null);
+    };
+    img.src = objectUrl;
   });
 }
 
 async function sha256(file: File): Promise<string | null> {
+  const webCrypto = getWebCrypto();
+  if (!webCrypto?.subtle) return null;
+
   try {
     const buffer = await file.arrayBuffer();
-    const digest = await crypto.subtle.digest("SHA-256", buffer);
+    const digest = await webCrypto.subtle.digest("SHA-256", buffer);
     const bytes = Array.from(new Uint8Array(digest));
     return bytes.map((b) => b.toString(16).padStart(2, "0")).join("");
   } catch {
@@ -69,6 +87,7 @@ async function sha256(file: File): Promise<string | null> {
 export default function UploadCardForm() {
   const [front, setFront] = useState<UploadFile>({ file: null });
   const [back, setBack] = useState<UploadFile>({ file: null });
+  const [enhanced, setEnhanced] = useState(false);
   const [status, setStatus] = useState<"idle" | "uploading" | "processing" | "error">(
     "idle",
   );
@@ -84,8 +103,18 @@ export default function UploadCardForm() {
     const file = event.target.files?.[0] ?? null;
     if (!file) return;
     const previewUrl = URL.createObjectURL(file);
-    if (side === "front") setFront({ file, previewUrl });
-    if (side === "back") setBack({ file, previewUrl });
+    if (side === "front") {
+      setFront((prev) => {
+        if (prev.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+        return { file, previewUrl };
+      });
+    }
+    if (side === "back") {
+      setBack((prev) => {
+        if (prev.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+        return { file, previewUrl };
+      });
+    }
   };
 
   const uploadImage = async (
@@ -138,20 +167,39 @@ export default function UploadCardForm() {
       height: null as number | null,
       confidence: null as number | null,
     };
-    try {
-      qrText = await decodeQrText(file);
-    } catch {
-      qrText = null;
-    }
-    try {
-      crop = await cropVisitCard(file);
-    } catch {
-      crop = {
-        blob: null,
-        width: null,
-        height: null,
-        confidence: null,
+    if (file.size <= MAX_PROCESSING_BYTES) {
+      const withTimeout = async <T,>(
+        task: Promise<T>,
+        ms: number,
+      ): Promise<T | null> => {
+        return Promise.race([
+          task,
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+        ]);
       };
+
+      try {
+        const qrResult = await withTimeout(decodeQrText(file), 2000);
+        qrText = typeof qrResult === "string" ? qrResult : null;
+      } catch {
+        qrText = null;
+      }
+
+      if (enhanced) {
+        try {
+          const cropResult = await withTimeout(cropVisitCard(file), 2500);
+          if (cropResult) {
+            crop = cropResult;
+          }
+        } catch {
+          crop = {
+            blob: null,
+            width: null,
+            height: null,
+            confidence: null,
+          };
+        }
+      }
     }
 
     const originalMeta = await uploadImage(file, side, "original");
@@ -277,7 +325,7 @@ export default function UploadCardForm() {
                 <img
                   src={state.previewUrl}
                   alt={`${label} preview`}
-                  className="h-32 w-full rounded-xl object-cover"
+                  className="max-h-80 h-auto w-full rounded-xl object-cover"
                 />
               ) : (
                 <div className="text-xs text-ink-500">
@@ -288,6 +336,16 @@ export default function UploadCardForm() {
           ),
         )}
       </div>
+
+      <label className="flex items-center gap-3 text-sm text-ink-600">
+        <input
+          type="checkbox"
+          checked={enhanced}
+          onChange={(event) => setEnhanced(event.target.checked)}
+          className="h-4 w-4 rounded border border-ink-300"
+        />
+        Enable enhanced crop + QR scan (slower, may be unstable on some devices)
+      </label>
 
       {message ? (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">

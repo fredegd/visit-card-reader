@@ -10,6 +10,11 @@ async function loadScript(src: string) {
   return new Promise<void>((resolve, reject) => {
     const existing = document.querySelector(`script[src="${src}"]`);
     if (existing) {
+      const existingCv = (window as unknown as { cv?: CvType }).cv;
+      if (existingCv?.Mat) {
+        resolve();
+        return;
+      }
       existing.addEventListener("load", () => resolve());
       existing.addEventListener("error", () => reject(new Error("Load failed")));
       return;
@@ -32,7 +37,8 @@ async function loadOpenCv(): Promise<CvType | null> {
   if (!cvPromise) {
     cvPromise = (async () => {
       const url =
-        process.env.NEXT_PUBLIC_OPENCV_URL ?? "/vendor/opencv.js";
+        process.env.NEXT_PUBLIC_OPENCV_URL ??
+        "https://docs.opencv.org/4.10.0/opencv.js";
       try {
         await loadScript(url);
       } catch {
@@ -61,11 +67,28 @@ async function loadOpenCv(): Promise<CvType | null> {
 }
 
 async function fileToCanvas(file: File, maxSize = 1600) {
-  const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, maxSize / Math.max(bitmap.width, bitmap.height));
+  let bitmap: ImageBitmap;
+  try {
+    const probe = await createImageBitmap(file);
+    const scale = Math.min(1, maxSize / Math.max(probe.width, probe.height));
+    const targetWidth = Math.round(probe.width * scale);
+    const targetHeight = Math.round(probe.height * scale);
+    probe.close();
+    bitmap = await (createImageBitmap as unknown as (
+      blob: Blob,
+      options?: { resizeWidth?: number; resizeHeight?: number; resizeQuality?: string },
+    ) => Promise<ImageBitmap>)(file, {
+      resizeWidth: targetWidth,
+      resizeHeight: targetHeight,
+      resizeQuality: "high",
+    });
+  } catch {
+    bitmap = await createImageBitmap(file);
+  }
+
   const canvas = document.createElement("canvas");
-  canvas.width = Math.round(bitmap.width * scale);
-  canvas.height = Math.round(bitmap.height * scale);
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
   const ctx = canvas.getContext("2d");
   if (!ctx) {
     throw new Error("Canvas context not available");
@@ -96,7 +119,7 @@ async function canvasToBlob(canvas: HTMLCanvasElement, mime = "image/jpeg") {
 }
 
 export async function decodeQrText(file: File) {
-  const { canvas, ctx } = await fileToCanvas(file, 1200);
+  const { canvas, ctx } = await fileToCanvas(file, 900);
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const result = jsQR(imageData.data, canvas.width, canvas.height);
   return result?.data ?? null;
@@ -113,7 +136,7 @@ export async function cropVisitCard(file: File) {
     };
   }
 
-  const { canvas } = await fileToCanvas(file, 1800);
+  const { canvas } = await fileToCanvas(file, 1400);
   const src = cv.imread(canvas);
   const gray = new cv.Mat();
   const blurred = new cv.Mat();

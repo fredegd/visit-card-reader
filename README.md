@@ -1,36 +1,65 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Visit Cards OCR
 
-## Getting Started
+Convert visit cards into structured contact data using Mistral OCR 3, with optional client-side OpenCV cropping and QR decoding.
 
-First, run the development server:
+## Features
+- Supabase Auth + Postgres + Storage
+- Upload front/back images
+- OCR via Mistral OCR 3 (`mistral-ocr-2512`)
+- QR code decoding + merge into extracted fields
+- Cropped image handling (OpenCV.js)
+- Export to vCard / CSV / JSON
+
+## Local Setup
+1. Install dependencies:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+bun install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Configure environment variables:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+this happens based on your own system
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+3. Apply database schema in Supabase SQL editor:
 
-## Learn More
+```sql
+-- See supabase/schema.sql
+```
 
-To learn more about Next.js, take a look at the following resources:
+4. Start dev server:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+bun run dev
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Supabase Setup
+- Create a private storage bucket named `card-images`
+- Apply the RLS policies in `supabase/schema.sql`
 
-## Deploy on Vercel
+## OpenCV.js (Client)
+By default, the app loads OpenCV.js from the CDN. You can override by setting:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- `NEXT_PUBLIC_OPENCV_URL` to a custom URL
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+If you want to self-host, place `opencv.js` in `public/vendor/opencv.js` and set:
+
+- `NEXT_PUBLIC_OPENCV_URL=/vendor/opencv.js`
+
+## Vercel Deployment
+1. Push the repo to GitHub.
+2. Import the project into Vercel.
+3. Configure environment variables in Vercel (Production + Preview):
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `NEXT_PUBLIC_OPENCV_URL` (optional)
+- `MISTRAL_API_KEY`
+- `MISTRAL_OCR_MODEL` (optional, defaults to `mistral-ocr-2512`)
+- `MISTRAL_API_URL` (optional)
+
+4. Deploy.
+
+## Notes
+- Cropping and QR decode run in the browser. If OpenCV fails to load, the app will fall back to the original image for OCR.
+- Multiple phone numbers are stored in `phones[]` and normalized to `primary_phone` for quick display.

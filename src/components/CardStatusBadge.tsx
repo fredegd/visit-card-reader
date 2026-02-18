@@ -9,6 +9,10 @@ const statusStyles: Record<CardStatus, string> = {
 };
 
 export default function CardStatusBadge({ status }: { status: CardStatus }) {
+  if (status === "ready") {
+    return null;
+  }
+
   return (
     <span
       className={cn(

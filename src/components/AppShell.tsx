@@ -14,7 +14,7 @@ export default function AppShell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-sand-100 text-ink-900">
+    <div className="flex min-h-screen flex-col bg-sand-100 text-ink-900">
       <div className="pointer-events-none fixed inset-0 opacity-70">
         <div className="absolute -left-32 top-16 h-72 w-72 rounded-full bg-coral-200 blur-[110px]" />
         <div className="absolute right-10 top-40 h-80 w-80 rounded-full bg-ocean-200 blur-[120px]" />
@@ -23,7 +23,7 @@ export default function AppShell({
 
       <header className="relative z-10 border-b border-ink-200/60 bg-sand-100/80 backdrop-blur">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-5">
-          <div className="flex items-center gap-3">
+          <Link href="/" className="flex items-center gap-3">
             <div className="grid h-10 w-10 place-items-center rounded-2xl bg-ink-900 text-sand-100">
               VC
             </div>
@@ -31,7 +31,7 @@ export default function AppShell({
               <p className="text-lg font-semibold tracking-tight">Visit Cards</p>
               <p className="text-xs text-ink-500">MVP workspace</p>
             </div>
-          </div>
+          </Link>
 
           <nav className="hidden items-center gap-6 text-sm font-medium text-ink-600 md:flex">
             {navItems.map((item) => (
@@ -66,7 +66,7 @@ export default function AppShell({
         </div>
       </header>
 
-      <main className="relative z-10 mx-auto w-full max-w-6xl px-6 py-10">
+      <main className="relative z-10 mx-auto w-full max-w-6xl flex-1 px-6 py-10">
         {children}
       </main>
 

@@ -1,4 +1,5 @@
-import type { ExtractedContact } from "@/lib/types";
+import type { ContactValue, ExtractedContact } from "@/lib/types";
+import { toLabeledList } from "@/lib/extract/contact";
 
 function escapeValue(value: string) {
   return value.replace(/\n/g, "\\n").replace(/,/g, "\\,").replace(/;/g, "\\;");
@@ -29,16 +30,27 @@ export function toVCard(contact: ExtractedContact): string {
     lines.push(`EMAIL;TYPE=INTERNET:${escapeValue(email)}`);
   });
 
-  contact.phones?.forEach((phone) => {
-    lines.push(`TEL;TYPE=CELL:${escapeValue(phone)}`);
+  const phones = toLabeledList(contact.phones as ContactValue[] | string);
+  phones.forEach((phone) => {
+    const label = phone.label?.toLowerCase() ?? "";
+    const type = label.includes("mobile") ? "CELL" : label.includes("home") ? "HOME" : "WORK";
+    lines.push(`TEL;TYPE=${type}:${escapeValue(phone.value)}`);
+  });
+
+  const faxes = toLabeledList(contact.faxes as ContactValue[] | string);
+  faxes.forEach((fax) => {
+    lines.push(`TEL;TYPE=FAX:${escapeValue(fax.value)}`);
   });
 
   contact.websites?.forEach((website) => {
     lines.push(`URL:${escapeValue(website)}`);
   });
 
-  if (contact.address) {
-    lines.push(`ADR;TYPE=WORK:;;${escapeValue(contact.address)};;;;`);
+  const addresses = toLabeledList(contact.address as ContactValue[] | string);
+  if (addresses.length > 0) {
+    addresses.forEach((address) => {
+      lines.push(`ADR;TYPE=WORK:;;${escapeValue(address.value)};;;;`);
+    });
   }
 
   if (contact.notes) {

@@ -1,6 +1,11 @@
 import Link from "next/link";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-export default function Home() {
+export default async function Home() {
+  const supabase = await createSupabaseServerClient();
+  const { data } = await supabase.auth.getUser();
+  const primaryHref = data.user ? "/dashboard" : "/login";
+
   return (
     <div className="min-h-screen bg-sand-100 text-ink-900">
       <div className="pointer-events-none fixed inset-0 opacity-70">
@@ -22,12 +27,14 @@ export default function Home() {
             edit and export to vCard, CSV, or JSON.
           </p>
           <div className="mt-8 flex flex-wrap gap-4">
-            <Link
-              href="/login"
-              className="rounded-full bg-ink-900 px-6 py-3 text-sm font-semibold text-sand-100"
-            >
-              Get started
-            </Link>
+            {data.user ? null : (
+              <Link
+                href={primaryHref}
+                className="rounded-full bg-ink-900 px-6 py-3 text-sm font-semibold text-sand-100"
+              >
+                Get started
+              </Link>
+            )}
             <Link
               href="/dashboard"
               className="rounded-full border border-ink-200/70 px-6 py-3 text-sm font-semibold text-ink-700"

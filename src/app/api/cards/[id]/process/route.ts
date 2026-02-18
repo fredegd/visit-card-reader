@@ -100,11 +100,47 @@ export async function POST(
       });
     }
 
-    const combinedText = [frontResult.text, backResult?.text]
-      .filter(Boolean)
-      .join("\n");
+    const frontExtracted = extractContactFromText(frontResult.text);
+    const backExtracted = backResult ? extractContactFromText(backResult.text) : undefined;
 
-    let extracted = extractContactFromText(combinedText);
+    const score = (contact: typeof frontExtracted) => {
+      const addressCount = Array.isArray(contact.address)
+        ? contact.address.length
+        : contact.address
+          ? 1
+          : 0;
+      const phoneCount = Array.isArray(contact.phones)
+        ? contact.phones.length
+        : contact.phones
+          ? 1
+          : 0;
+      const faxCount = Array.isArray(contact.faxes)
+        ? contact.faxes.length
+        : contact.faxes
+          ? 1
+          : 0;
+      return (
+        (contact.emails?.length ?? 0) +
+        phoneCount +
+        (contact.websites?.length ?? 0) +
+        faxCount +
+        addressCount
+      );
+    };
+
+    const frontScore = score(frontExtracted);
+    const backScore = backExtracted ? score(backExtracted) : -1;
+
+    const primary = backExtracted && backScore >= frontScore ? backExtracted : frontExtracted;
+    const secondary = backExtracted && backScore >= frontScore ? frontExtracted : backExtracted;
+
+    if (secondary && score(secondary) === 0) {
+      secondary.name = undefined;
+      secondary.company = undefined;
+      secondary.title = undefined;
+    }
+
+    let extracted = secondary ? mergeContacts(primary, secondary) : primary;
     const qrTexts = [qrPayload?.front, qrPayload?.back].filter(
       (value): value is string => Boolean(value),
     );

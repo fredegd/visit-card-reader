@@ -1,4 +1,4 @@
-import type { ExtractedContact } from "@/lib/types";
+import type { ExtractedContact, LabeledValue } from "@/lib/types";
 import { extractContactFromText } from "@/lib/extract/contact";
 
 function parseVCard(payload: string): ExtractedContact {
@@ -17,6 +17,7 @@ function parseVCard(payload: string): ExtractedContact {
   const contact: ExtractedContact = {
     emails: [],
     phones: [],
+    faxes: [],
     websites: [],
   };
 
@@ -49,9 +50,20 @@ function parseVCard(payload: string): ExtractedContact {
       case "EMAIL":
         contact.emails?.push(value);
         break;
-      case "TEL":
-        contact.phones?.push(value);
+      case "TEL": {
+        const label = keyPart.split(";").find((part) => part.toUpperCase().startsWith("TYPE="));
+        const type = label?.split("=")[1]?.toLowerCase();
+        const phone: LabeledValue = {
+          label: type ?? undefined,
+          value,
+        };
+        if (type?.includes("fax")) {
+          contact.faxes?.push(phone);
+        } else {
+          contact.phones?.push(phone);
+        }
         break;
+      }
       case "URL":
         contact.websites?.push(value);
         break;
@@ -88,11 +100,11 @@ export function extractContactFromQrPayload(payload: string): ExtractedContact {
 
   if (upper.startsWith("TEL:")) {
     const phone = trimmed.replace(/^tel:/i, "").trim();
-    return { phones: [phone], raw_text: trimmed };
+    return { phones: [{ label: "qr", value: phone }], raw_text: trimmed };
   }
 
   if (upper.startsWith("HTTP") || upper.startsWith("WWW.")) {
-    return { websites: [trimmed], raw_text: trimmed };
+    return { notes: trimmed, raw_text: trimmed };
   }
 
   return extractContactFromText(trimmed);

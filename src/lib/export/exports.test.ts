@@ -8,9 +8,9 @@ const contact = {
   company: "Analytical Engines",
   title: "Engineer",
   emails: ["ada@example.com"],
-  phones: ["+12025550123"],
+  phones: [{ label: "mobile", value: "+12025550123" }],
   websites: ["https://adalovelace.org"],
-  address: "12 St James Sq, London",
+  address: [{ label: "office", value: "12 St James Sq, London" }],
   notes: "Met at compute meetup",
 };
 

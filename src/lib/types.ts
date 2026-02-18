@@ -1,13 +1,21 @@
 export type CardStatus = "uploaded" | "processing" | "ready" | "error";
 
+export type LabeledValue = {
+  label?: string;
+  value: string;
+};
+
+export type ContactValue = string | LabeledValue;
+
 export type ExtractedContact = {
   name?: string;
   company?: string;
   title?: string;
   emails?: string[];
-  phones?: string[];
+  phones?: ContactValue[];
+  faxes?: ContactValue[];
   websites?: string[];
-  address?: string;
+  address?: ContactValue[] | string;
   notes?: string;
   raw_text?: string;
 };

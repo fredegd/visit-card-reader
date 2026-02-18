@@ -103,7 +103,7 @@ export default async function CardDetailPage({
                 <img
                   src={signedUrl}
                   alt={`${label} card`}
-                  className="mt-3 h-44 w-full rounded-2xl object-cover"
+                  className="mt-3 max-h-80 h-auto w-full rounded-2xl object-cover"
                 />
               ) : (
                 <p className="mt-2 text-xs text-ink-500">
