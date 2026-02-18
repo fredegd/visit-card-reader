@@ -1,0 +1,311 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { cn } from "@/lib/utils";
+import { cropVisitCard, decodeQrText } from "@/lib/image-processing";
+
+type UploadFile = {
+  file: File | null;
+  previewUrl?: string;
+};
+
+const uuidRegex =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+type ImageMeta = {
+  storage_path: string;
+  cropped_path?: string | null;
+  cropped_width?: number | null;
+  cropped_height?: number | null;
+  crop_confidence?: number | null;
+  mime: string;
+  width: number | null;
+  height: number | null;
+  checksum: string | null;
+};
+
+type PreparedImage = ImageMeta & { qr_text?: string | null };
+
+function randomId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+
+  if (typeof crypto !== "undefined" && "getRandomValues" in crypto) {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    // RFC4122 v4
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+async function getImageSize(file: File): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({ width: img.width, height: img.height });
+    img.onerror = () => resolve(null);
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+async function sha256(file: File): Promise<string | null> {
+  try {
+    const buffer = await file.arrayBuffer();
+    const digest = await crypto.subtle.digest("SHA-256", buffer);
+    const bytes = Array.from(new Uint8Array(digest));
+    return bytes.map((b) => b.toString(16).padStart(2, "0")).join("");
+  } catch {
+    return null;
+  }
+}
+
+export default function UploadCardForm() {
+  const [front, setFront] = useState<UploadFile>({ file: null });
+  const [back, setBack] = useState<UploadFile>({ file: null });
+  const [status, setStatus] = useState<"idle" | "uploading" | "processing" | "error">(
+    "idle",
+  );
+  const [message, setMessage] = useState<string | null>(null);
+  const router = useRouter();
+
+  const supabase = createSupabaseBrowserClient();
+
+  const handlePick = (
+    side: "front" | "back",
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0] ?? null;
+    if (!file) return;
+    const previewUrl = URL.createObjectURL(file);
+    if (side === "front") setFront({ file, previewUrl });
+    if (side === "back") setBack({ file, previewUrl });
+  };
+
+  const uploadImage = async (
+    file: File,
+    side: "front" | "back",
+    variant: "original" | "cropped" = "original",
+  ): Promise<ImageMeta> => {
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError || !userData.user) {
+      throw new Error("You need to be signed in to upload.");
+    }
+
+    const metadata = await getImageSize(file);
+    const checksum = await sha256(file);
+    const extension = file.name.split(".").pop() || "jpg";
+    const filename = `${randomId()}.${extension}`;
+    const storagePath =
+      variant === "cropped"
+        ? `${userData.user.id}/${side}/cropped/${filename}`
+        : `${userData.user.id}/${side}/${filename}`;
+
+    const { error } = await supabase.storage
+      .from("card-images")
+      .upload(storagePath, file, {
+        contentType: file.type,
+        upsert: true,
+      });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return {
+      storage_path: storagePath,
+      mime: file.type,
+      width: metadata?.width ?? null,
+      height: metadata?.height ?? null,
+      checksum,
+    };
+  };
+
+  const prepareImage = async (
+    file: File,
+    side: "front" | "back",
+  ): Promise<PreparedImage> => {
+    let qrText: string | null = null;
+    let crop = {
+      blob: null as Blob | null,
+      width: null as number | null,
+      height: null as number | null,
+      confidence: null as number | null,
+    };
+    try {
+      qrText = await decodeQrText(file);
+    } catch {
+      qrText = null;
+    }
+    try {
+      crop = await cropVisitCard(file);
+    } catch {
+      crop = {
+        blob: null,
+        width: null,
+        height: null,
+        confidence: null,
+      };
+    }
+
+    const originalMeta = await uploadImage(file, side, "original");
+
+    if (crop.blob) {
+      const croppedFile = new File([crop.blob], `cropped-${file.name}`, {
+        type: "image/jpeg",
+      });
+      const croppedMeta = await uploadImage(croppedFile, side, "cropped");
+
+      return {
+        ...originalMeta,
+        cropped_path: croppedMeta.storage_path,
+        cropped_width: crop.width ?? croppedMeta.width ?? null,
+        cropped_height: crop.height ?? croppedMeta.height ?? null,
+        crop_confidence: crop.confidence ?? null,
+        qr_text: qrText ?? null,
+      };
+    }
+
+    return {
+      ...originalMeta,
+      qr_text: qrText ?? null,
+    };
+  };
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setMessage(null);
+
+    if (!front.file) {
+      setMessage("Please upload at least the front of the card.");
+      return;
+    }
+
+    setStatus("uploading");
+
+    try {
+      const frontMeta = await prepareImage(front.file, "front");
+      const backMeta = back.file ? await prepareImage(back.file, "back") : null;
+
+      const { qr_text: frontQrText, ...frontPayload } = frontMeta;
+      const { qr_text: backQrText, ...backPayload } = backMeta ?? {};
+
+      const response = await fetch("/api/cards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          front: frontPayload,
+          back: backMeta ? backPayload : null,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to create card.");
+      }
+
+      const payload = (await response.json().catch(() => null)) as
+        | { id?: string; error?: string }
+        | null;
+
+      if (!payload?.id || !uuidRegex.test(payload.id)) {
+        throw new Error(payload?.error ?? "Card ID missing.");
+      }
+
+      setStatus("processing");
+
+      const processResponse = await fetch(`/api/cards/${payload.id}/process`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          qr: {
+            front: frontQrText ?? null,
+            back: backQrText ?? null,
+          },
+        }),
+      });
+
+      if (!processResponse.ok) {
+        const errorText = await processResponse.text();
+        throw new Error(errorText || "Failed to process card.");
+      }
+
+      router.push(`/cards/${payload.id}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Upload failed.";
+      setMessage(message);
+      setStatus("error");
+    }
+  };
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="grid gap-6 rounded-3xl border border-ink-200/70 bg-white/80 p-6 shadow-soft backdrop-blur"
+    >
+      <div>
+        <h2 className="text-xl font-semibold">Upload visit card</h2>
+        <p className="text-sm text-ink-500">
+          Add the front image (required) and optionally the back side.
+        </p>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        {[{ label: "Front", side: "front" as const, state: front }, { label: "Back", side: "back" as const, state: back }].map(
+          ({ label, side, state }) => (
+            <label
+              key={side}
+              className={cn(
+                "group flex min-h-[220px] cursor-pointer flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-ink-200/70 bg-sand-50/80 p-4 text-center transition hover:border-ink-400",
+                state.file ? "border-solid" : "",
+              )}
+            >
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(event) => handlePick(side, event)}
+              />
+              <div className="text-sm font-semibold text-ink-700">{label}</div>
+              {state.previewUrl ? (
+                <img
+                  src={state.previewUrl}
+                  alt={`${label} preview`}
+                  className="h-32 w-full rounded-xl object-cover"
+                />
+              ) : (
+                <div className="text-xs text-ink-500">
+                  Drop an image or click to browse
+                </div>
+              )}
+            </label>
+          ),
+        )}
+      </div>
+
+      {message ? (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {message}
+        </div>
+      ) : null}
+
+      <button
+        type="submit"
+        className="inline-flex items-center justify-center rounded-full bg-ink-900 px-6 py-3 text-sm font-semibold text-sand-100 transition hover:bg-ink-800 disabled:cursor-not-allowed disabled:opacity-70"
+        disabled={status === "uploading" || status === "processing"}
+      >
+        {status === "uploading"
+          ? "Uploading..."
+          : status === "processing"
+            ? "Processing..."
+            : "Analyze card"}
+      </button>
+    </form>
+  );
+}

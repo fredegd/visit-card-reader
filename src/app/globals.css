@@ -1,26 +1,52 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --sand-100: #f7f1ea;
+  --sand-50: #fdfaf6;
+  --ink-900: #1a1a1a;
+  --ink-700: #2a2a2a;
+  --ink-600: #3d3d3d;
+  --ink-500: #6a6a6a;
+  --ink-200: #ded8d0;
+  --coral-200: #f8bfa3;
+  --ocean-200: #a8d8e8;
+  --moss-200: #cfe7b5;
+  --radius-xl: 24px;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-sand-100: var(--sand-100);
+  --color-sand-50: var(--sand-50);
+  --color-ink-900: var(--ink-900);
+  --color-ink-700: var(--ink-700);
+  --color-ink-600: var(--ink-600);
+  --color-ink-500: var(--ink-500);
+  --color-ink-200: var(--ink-200);
+  --color-coral-200: var(--coral-200);
+  --color-ocean-200: var(--ocean-200);
+  --color-moss-200: var(--moss-200);
+  --radius-3xl: var(--radius-xl);
+  --font-sans: var(--font-space-grotesk);
+  --font-display: var(--font-fraunces);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--sand-100);
+  color: var(--ink-900);
+  font-family: var(--font-space-grotesk), "Space Grotesk", system-ui;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-fraunces), "Fraunces", serif;
+}
+
+.shadow-soft {
+  box-shadow: 0 20px 50px rgba(34, 34, 34, 0.08);
 }

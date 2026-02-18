@@ -1,63 +1,65 @@
-import Image from "next/image";
+import Link from "next/link";
 
 export default function Home() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <div className="min-h-screen bg-sand-100 text-ink-900">
+      <div className="pointer-events-none fixed inset-0 opacity-70">
+        <div className="absolute -left-32 top-16 h-72 w-72 rounded-full bg-coral-200 blur-[110px]" />
+        <div className="absolute right-10 top-40 h-80 w-80 rounded-full bg-ocean-200 blur-[120px]" />
+        <div className="absolute bottom-0 left-1/3 h-64 w-64 rounded-full bg-moss-200 blur-[110px]" />
+      </div>
+
+      <main className="relative z-10 mx-auto flex min-h-screen w-full max-w-6xl flex-col justify-center px-6 py-16">
+        <div className="max-w-2xl">
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-ink-500">
+            Visit Card OCR
           </p>
+          <h1 className="mt-6 text-4xl font-semibold leading-tight md:text-5xl">
+            Turn visit cards into clean contact data in seconds.
+          </h1>
+          <p className="mt-4 text-base text-ink-600">
+            Upload a front/back image, let Mistral OCR 3 extract details, then
+            edit and export to vCard, CSV, or JSON.
+          </p>
+          <div className="mt-8 flex flex-wrap gap-4">
+            <Link
+              href="/login"
+              className="rounded-full bg-ink-900 px-6 py-3 text-sm font-semibold text-sand-100"
+            >
+              Get started
+            </Link>
+            <Link
+              href="/dashboard"
+              className="rounded-full border border-ink-200/70 px-6 py-3 text-sm font-semibold text-ink-700"
+            >
+              Go to dashboard
+            </Link>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        <div className="mt-12 grid gap-6 md:grid-cols-3">
+          {[
+            {
+              title: "Upload",
+              copy: "Front or front+back images, with progress and retries.",
+            },
+            {
+              title: "Extract",
+              copy: "Pluggable OCR pipeline with Mistral OCR 3.",
+            },
+            {
+              title: "Export",
+              copy: "vCard, CSV, or JSON in one click.",
+            },
+          ].map((item) => (
+            <div
+              key={item.title}
+              className="rounded-3xl border border-ink-200/70 bg-white/80 p-6 shadow-soft"
+            >
+              <h3 className="text-lg font-semibold">{item.title}</h3>
+              <p className="mt-2 text-sm text-ink-500">{item.copy}</p>
+            </div>
+          ))}
         </div>
       </main>
     </div>
