@@ -26,7 +26,7 @@ export default function CardList({ cards, thumbnails }: CardListProps) {
   }
 
   return (
-    <div className="grid gap-4 md:grid-cols-2">
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
       {cards.map((card) => {
         const displayName =
           card.full_name || card.company || card.normalized?.full_name || "Untitled card";
@@ -42,7 +42,7 @@ export default function CardList({ cards, thumbnails }: CardListProps) {
           <Link
             key={card.id}
             href={`/cards/${card.id}`}
-            className="group rounded-3xl border border-ink-200/70 bg-white/80 p-5 shadow-soft transition hover:border-ink-400"
+            className="group w-full min-w-0 rounded-3xl border border-ink-200/70 bg-white/80 p-5 shadow-soft transition hover:border-ink-400"
           >
             <div className="flex items-start gap-4">
               <div className="relative h-24 w-36 shrink-0 overflow-hidden rounded-2xl border border-ink-100 bg-sand-50">
