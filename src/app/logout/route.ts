@@ -1,8 +1,13 @@
-import { redirect } from "next/navigation";
+import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-export async function GET() {
+export async function POST(request: Request) {
   const supabase = await createSupabaseServerClient();
   await supabase.auth.signOut();
-  redirect("/login");
+  return NextResponse.redirect(new URL("/login", request.url), { status: 303 });
+}
+
+export async function GET(request: Request) {
+  console.warn("GET /logout called; redirecting without sign-out.");
+  return NextResponse.redirect(new URL("/login", request.url), { status: 303 });
 }

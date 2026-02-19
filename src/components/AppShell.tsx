@@ -45,12 +45,14 @@ export default function AppShell({
             <span className="hidden text-ink-500 md:inline">
               {user.email ?? "Signed in"}
             </span>
-            <Link
-              href="/logout"
-              className="rounded-full border border-ink-200/70 px-4 py-2 text-ink-700 transition hover:border-ink-400 hover:text-ink-900"
-            >
-              Sign out
-            </Link>
+            <form action="/logout" method="post">
+              <button
+                type="submit"
+                className="rounded-full border border-ink-200/70 px-4 py-2 text-ink-700 transition hover:border-ink-400 hover:text-ink-900"
+              >
+                Sign out
+              </button>
+            </form>
           </div>
         </div>
         <div className="mx-auto flex w-full max-w-6xl items-center gap-3 px-6 pb-4 md:hidden">
