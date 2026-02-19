@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   extractOcrBoxes,
   extractOcrDimensions,
@@ -20,6 +20,7 @@ type OcrSelectionPanelProps = {
   onApplySelection: (text: string) => void;
   activeTargetLabel?: string | null;
   onApplyToActiveTarget?: (text: string) => void;
+  actions?: ReactNode;
 };
 
 function normalizeBoxes(
@@ -71,6 +72,7 @@ export default function OcrSelectionPanel({
   onApplySelection,
   activeTargetLabel,
   onApplyToActiveTarget,
+  actions,
 }: OcrSelectionPanelProps) {
   const [imageSize, setImageSize] = useState<{
     width: number;
@@ -345,24 +347,27 @@ export default function OcrSelectionPanel({
             Click or drag text boxes onto fields.
           </p>
         </div>
-        {levels.length > 1 ? (
-          <div className="flex items-center gap-2 text-xs">
-            {levels.map((level) => (
-              <button
-                key={level}
-                type="button"
-                onClick={() => setActiveLevel(level)}
-                className={`rounded-full border px-3 py-1 ${
-                  activeLevel === level
-                    ? "border-ink-700 bg-ink-900 text-sand-100"
-                    : "border-ink-200/70 bg-white text-ink-600"
-                }`}
-              >
-                {levelLabel(level)}
-              </button>
-            ))}
-          </div>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          {actions}
+          {levels.length > 1 ? (
+            <div className="flex items-center gap-2 text-xs">
+              {levels.map((level) => (
+                <button
+                  key={level}
+                  type="button"
+                  onClick={() => setActiveLevel(level)}
+                  className={`rounded-full border px-3 py-1 ${
+                    activeLevel === level
+                      ? "border-ink-700 bg-ink-900 text-sand-100"
+                      : "border-ink-200/70 bg-white text-ink-600"
+                  }`}
+                >
+                  {levelLabel(level)}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
       </div>
 
       <div className="mt-2 grid gap-1 text-[11px] text-ink-500">

@@ -1,4 +1,6 @@
 import CardDetailForm from "@/components/CardDetailForm";
+import BackImageUploadSlot from "@/components/BackImageUploadSlot";
+import CardImageActions from "@/components/CardImageActions";
 import DeleteCardButton from "@/components/DeleteCardButton";
 import ProcessingPanel from "@/components/ProcessingPanel";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -36,6 +38,7 @@ export default async function CardDetailPage({
   const imageList = (images ?? []) as CardImageRecord[];
   const frontImage = imageList.find((img) => img.side === "front");
   const backImage = imageList.find((img) => img.side === "back");
+  const hasBackImage = Boolean(backImage);
 
   const [frontSigned, backSigned] = await Promise.all([
     frontImage
@@ -84,22 +87,51 @@ export default async function CardDetailPage({
         <div className="grid gap-4 md:grid-cols-2">
           {[
             {
+              key: "front",
               label: "Front",
+              side: "front" as const,
               image: frontImage,
               signedUrl: frontSigned.data?.signedUrl ?? null,
+              placeholder: false,
             },
-            {
-              label: "Back",
-              image: backImage,
-              signedUrl: backSigned.data?.signedUrl ?? null,
-            },
-          ].map(({ label, image, signedUrl }) => (
+            hasBackImage
+              ? {
+                  key: "back",
+                  label: "Back",
+                  side: "back" as const,
+                  image: backImage,
+                  signedUrl: backSigned.data?.signedUrl ?? null,
+                  placeholder: false,
+                }
+              : {
+                  key: "back-empty",
+                  label: "Back",
+                  side: "back" as const,
+                  image: null,
+                  signedUrl: null,
+                  placeholder: true,
+                },
+          ].map(({ key, label, side, image, signedUrl, placeholder }) => (
             <div
-              key={label}
+              key={key}
               className="rounded-3xl border border-ink-200/70 bg-white/80 p-4 shadow-soft"
             >
-              <p className="text-sm font-semibold text-ink-700">{label}</p>
-              {image ? (
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-sm font-semibold text-ink-700">{label}</p>
+                <CardImageActions
+                  cardId={card.id}
+                  side={side}
+                  hasImage={Boolean(image)}
+                />
+              </div>
+              {placeholder ? (
+                <div className="mt-3">
+                  <BackImageUploadSlot
+                    cardId={card.id}
+                    showMessage={false}
+                  />
+                </div>
+              ) : image ? (
                 signedUrl ? (
                   <img
                     src={signedUrl}
@@ -142,15 +174,19 @@ export default async function CardDetailPage({
                   ? (card.raw_ocr as { front?: unknown }).front ?? null
                   : null,
             },
-            {
-              label: "Back",
-              side: "back",
-              signedUrl: backSigned.data?.signedUrl ?? null,
-              rawOcr:
-                card.raw_ocr && typeof card.raw_ocr === "object"
-                  ? (card.raw_ocr as { back?: unknown }).back ?? null
-                  : null,
-            },
+            ...(hasBackImage
+              ? [
+                  {
+                    label: "Back",
+                    side: "back" as const,
+                    signedUrl: backSigned.data?.signedUrl ?? null,
+                    rawOcr:
+                      card.raw_ocr && typeof card.raw_ocr === "object"
+                        ? (card.raw_ocr as { back?: unknown }).back ?? null
+                        : null,
+                  },
+                ]
+              : []),
           ]}
         />
       )}

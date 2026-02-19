@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import BackImageUploadSlot from "@/components/BackImageUploadSlot";
+import CardImageActions from "@/components/CardImageActions";
 import DeleteCardButton from "@/components/DeleteCardButton";
 import OcrSelectionPanel from "@/components/OcrSelectionPanel";
 import type { ContactValue, ExtractedContact, LabeledValue } from "@/lib/types";
@@ -21,6 +23,7 @@ export default function CardDetailForm({
     rawOcr?: unknown | null;
   }>;
 }) {
+  const hasBackImage = images?.some((image) => image.side === "back") ?? false;
   const [form, setForm] = useState<ExtractedContact>(initial);
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">(
     "idle",
@@ -105,7 +108,32 @@ export default function CardDetailForm({
     }));
   };
 
-  const normalizeDropText = (value: string) => value.replace(/\s+/g, " ").trim();
+  const sanitizeText = (
+    value: string,
+    {
+      preserveNewlines = false,
+      maxLength = 800,
+    }: { preserveNewlines?: boolean; maxLength?: number } = {},
+  ) => {
+    if (!value) return "";
+    const withoutControls = value.replace(
+      /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,
+      "",
+    );
+    const normalized = preserveNewlines
+      ? withoutControls
+          .replace(/\r\n/g, "\n")
+          .replace(/[ \t]+/g, " ")
+          .replace(/\n{3,}/g, "\n\n")
+          .trim()
+      : withoutControls.replace(/\s+/g, " ").trim();
+    return normalized.length > maxLength
+      ? normalized.slice(0, maxLength)
+      : normalized;
+  };
+
+  const normalizeDropText = (value: string) =>
+    sanitizeText(value, { preserveNewlines: false, maxLength: 2000 });
 
   const extractDropItems = (value: string) => {
     return value
@@ -167,6 +195,63 @@ export default function CardDetailForm({
     });
   };
 
+  const sanitizeContactValue = (
+    item: ContactValue,
+  ): ContactValue | null => {
+    if (typeof item === "string") {
+      const value = sanitizeText(item, { maxLength: 800 });
+      return value ? value : null;
+    }
+    const value = sanitizeText(item.value, { maxLength: 800 });
+    if (!value) return null;
+    const label = item.label
+      ? sanitizeText(item.label, { maxLength: 120 })
+      : undefined;
+    return label ? { label, value } : { value };
+  };
+
+  const sanitizeContactValues = (items?: ContactValue[] | null) => {
+    if (!items || items.length === 0) return items ?? [];
+    return items
+      .map((item) => sanitizeContactValue(item))
+      .filter(Boolean) as ContactValue[];
+  };
+
+  const sanitizeStrings = (items?: string[] | null) => {
+    if (!items || items.length === 0) return items ?? [];
+    return items
+      .map((item) => sanitizeText(item, { maxLength: 800 }))
+      .filter(Boolean);
+  };
+
+  const sanitizeExtracted = (value: ExtractedContact): ExtractedContact => {
+    return {
+      ...value,
+      name: value.name ? sanitizeText(value.name, { maxLength: 200 }) : value.name,
+      company: value.company
+        ? sanitizeText(value.company, { maxLength: 240 })
+        : value.company,
+      title: value.title
+        ? sanitizeText(value.title, { maxLength: 240 })
+        : value.title,
+      emails: sanitizeStrings(value.emails),
+      websites: sanitizeStrings(value.websites),
+      phones: sanitizeContactValues(value.phones),
+      faxes: sanitizeContactValues(value.faxes),
+      address: Array.isArray(value.address)
+        ? sanitizeContactValues(value.address)
+        : value.address
+          ? sanitizeText(value.address, {
+              preserveNewlines: true,
+              maxLength: 2000,
+            })
+          : value.address,
+      notes: value.notes
+        ? sanitizeText(value.notes, { preserveNewlines: true, maxLength: 4000 })
+        : value.notes,
+    };
+  };
+
   const handleDrop =
     (target: DropTarget) => (event: React.DragEvent<HTMLElement>) => {
       event.preventDefault();
@@ -213,10 +298,11 @@ export default function CardDetailForm({
   const handleSave = async () => {
     setStatus("saving");
     try {
+      const sanitized = sanitizeExtracted(form);
       const response = await fetch(`/api/cards/${cardId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ extracted_json: form }),
+        body: JSON.stringify({ extracted_json: sanitized }),
       });
 
       if (!response.ok) {
@@ -295,8 +381,20 @@ export default function CardDetailForm({
               onApplySelection={applySelectionText}
               activeTargetLabel={activeTargetLabel}
               onApplyToActiveTarget={applySelectionToActiveTarget}
+              actions={
+                <CardImageActions
+                  cardId={cardId}
+                  side={image.side}
+                  hasImage={Boolean(image.signedUrl)}
+                />
+              }
             />
           ))}
+          {!hasBackImage ? (
+            <div className="rounded-3xl border border-ink-200/70 bg-white/80 p-4 shadow-soft">
+              <BackImageUploadSlot cardId={cardId} label="Back" />
+            </div>
+          ) : null}
         </div>
       ) : null}
 
