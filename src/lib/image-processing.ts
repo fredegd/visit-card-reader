@@ -1,69 +1,176 @@
 "use client";
 
 import jsQR from "jsqr";
+type TelemetryDetail = Record<string, unknown>;
+type ProcessingContext = { side?: "front" | "back" };
+type CropResult = {
+  blob: Blob | null;
+  width: number | null;
+  height: number | null;
+  confidence: number | null;
+};
 
-type CvType = any;
+const WORKER_PATH = "/workers/opencv-crop.js";
+const WORKER_TIMEOUT_MS = 4000;
+let telemetryHooksRegistered = false;
+let cropWorkerPromise: Promise<Worker | null> | null = null;
+let cropWorkerRequestId = 0;
+const cropWorkerPending = new Map<
+  number,
+  {
+    resolve: (value: CropResult) => void;
+    reject: (error: Error) => void;
+    timeoutId: number;
+    context?: ProcessingContext;
+  }
+>();
 
-let cvPromise: Promise<CvType | null> | null = null;
-
-async function loadScript(src: string) {
-  return new Promise<void>((resolve, reject) => {
-    const existing = document.querySelector(`script[src="${src}"]`);
-    if (existing) {
-      const existingCv = (window as unknown as { cv?: CvType }).cv;
-      if (existingCv?.Mat) {
-        resolve();
-        return;
-      }
-      existing.addEventListener("load", () => resolve());
-      existing.addEventListener("error", () => reject(new Error("Load failed")));
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.src = src;
-    script.async = true;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Load failed"));
-    document.body.appendChild(script);
-  });
-}
-
-async function loadOpenCv(): Promise<CvType | null> {
-  if (typeof window === "undefined") return null;
-  const existing = (window as unknown as { cv?: CvType }).cv;
-  if (existing?.Mat) return existing;
-
-  if (!cvPromise) {
-    cvPromise = (async () => {
-      const url =
-        process.env.NEXT_PUBLIC_OPENCV_URL ??
-        "https://docs.opencv.org/4.10.0/opencv.js";
-      try {
-        await loadScript(url);
-      } catch {
-        return null;
-      }
-
-      const cv = (window as unknown as { cv?: CvType }).cv;
-      if (!cv) return null;
-
-      if (cv?.onRuntimeInitialized) {
-        return await new Promise<CvType>((resolve) => {
-          cv.onRuntimeInitialized = () => resolve(cv);
-        });
-      }
-
-      if (cv?.ready && typeof cv.ready.then === "function") {
-        await cv.ready;
-        return cv;
-      }
-
-      return cv;
-    })();
+export function logTelemetry(event: string, detail?: TelemetryDetail) {
+  try {
+    console.info(`[telemetry] ${event}`, detail ?? {});
+  } catch {
+    // Ignore console failures
   }
 
-  return cvPromise;
+  if (typeof window === "undefined") return;
+
+  if (!telemetryHooksRegistered) {
+    telemetryHooksRegistered = true;
+    window.addEventListener("error", (event) => {
+      try {
+        logTelemetry("window:error", {
+          message: event.message,
+          filename: event.filename,
+          lineno: event.lineno,
+          colno: event.colno,
+          error: event.error instanceof Error ? event.error.message : null,
+        });
+      } catch {
+        // Ignore telemetry failures
+      }
+    });
+    window.addEventListener("unhandledrejection", (event) => {
+      const reason =
+        event.reason instanceof Error
+          ? event.reason.message
+          : typeof event.reason === "string"
+            ? event.reason
+            : null;
+      try {
+        logTelemetry("window:unhandledrejection", { reason });
+      } catch {
+        // Ignore telemetry failures
+      }
+    });
+  }
+
+  try {
+    const payload = {
+      event,
+      detail: detail ?? {},
+      ts: Date.now(),
+      href: window.location?.href ?? null,
+      ua: navigator.userAgent,
+    };
+    const body = JSON.stringify(payload);
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon("/api/telemetry", body);
+    } else {
+      void fetch("/api/telemetry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        keepalive: true,
+      });
+    }
+  } catch {
+    // Ignore telemetry failures
+  }
+}
+
+function getWorkerOpenCvUrl() {
+  return (
+    process.env.NEXT_PUBLIC_OPENCV_WORKER_URL ??
+    process.env.NEXT_PUBLIC_OPENCV_FALLBACK_URL ??
+    "/opencv/opencv.js"
+  );
+}
+
+async function getCropWorker(): Promise<Worker | null> {
+  if (typeof window === "undefined") return null;
+  if (typeof Worker === "undefined") {
+    logTelemetry("worker:unsupported");
+    return null;
+  }
+  if (cropWorkerPromise) return cropWorkerPromise;
+
+  cropWorkerPromise = new Promise((resolve) => {
+    try {
+      const worker = new Worker(WORKER_PATH);
+      worker.addEventListener("message", (event) => {
+        const data = event.data;
+        if (!data || typeof data !== "object") {
+          logTelemetry("worker:message_invalid");
+          return;
+        }
+        if (data.type === "telemetry") {
+          const detail =
+            data.detail && typeof data.detail === "object"
+              ? { source: "worker", ...data.detail }
+              : { source: "worker" };
+          logTelemetry(data.event ?? "worker:telemetry", detail);
+          return;
+        }
+        if (data.type === "result") {
+          const pending = cropWorkerPending.get(data.id);
+          if (!pending) {
+            logTelemetry("worker:orphan_result", { id: data.id });
+            return;
+          }
+          window.clearTimeout(pending.timeoutId);
+          cropWorkerPending.delete(data.id);
+          if (data.ok) {
+            pending.resolve({
+              blob: data.blob ?? null,
+              width: typeof data.width === "number" ? data.width : null,
+              height: typeof data.height === "number" ? data.height : null,
+              confidence:
+                typeof data.confidence === "number" ? data.confidence : null,
+            });
+          } else {
+            const message =
+              typeof data.error === "string" ? data.error : "Worker crop failed";
+            logTelemetry("crop:worker_error", {
+              message,
+              ...pending.context,
+            });
+            pending.reject(new Error(message));
+          }
+          return;
+        }
+        logTelemetry("worker:message_unknown", { type: data.type });
+      });
+      worker.addEventListener("error", (event) => {
+        logTelemetry("worker:error", {
+          message: event.message,
+          filename: event.filename,
+          lineno: event.lineno,
+          colno: event.colno,
+        });
+      });
+      worker.addEventListener("messageerror", () => {
+        logTelemetry("worker:messageerror");
+      });
+      resolve(worker);
+    } catch (error) {
+      logTelemetry("worker:init_error", {
+        message: error instanceof Error ? error.message : "unknown error",
+      });
+      resolve(null);
+    }
+  });
+
+  return cropWorkerPromise;
 }
 
 async function fileToCanvas(file: File, maxSize = 1600) {
@@ -98,157 +205,81 @@ async function fileToCanvas(file: File, maxSize = 1600) {
   return { canvas, ctx };
 }
 
-function orderPoints(points: Array<{ x: number; y: number }>) {
-  const sum = points.map((p) => p.x + p.y);
-  const diff = points.map((p) => p.y - p.x);
-  const tl = points[sum.indexOf(Math.min(...sum))];
-  const br = points[sum.indexOf(Math.max(...sum))];
-  const tr = points[diff.indexOf(Math.min(...diff))];
-  const bl = points[diff.indexOf(Math.max(...diff))];
-  return [tl, tr, br, bl];
-}
-
-function distance(a: { x: number; y: number }, b: { x: number; y: number }) {
-  return Math.hypot(a.x - b.x, a.y - b.y);
-}
-
-async function canvasToBlob(canvas: HTMLCanvasElement, mime = "image/jpeg") {
-  return new Promise<Blob | null>((resolve) => {
-    canvas.toBlob((blob) => resolve(blob), mime, 0.92);
-  });
-}
-
-export async function decodeQrText(file: File) {
-  const { canvas, ctx } = await fileToCanvas(file, 900);
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const result = jsQR(imageData.data, canvas.width, canvas.height);
-  return result?.data ?? null;
-}
-
-export async function cropVisitCard(file: File) {
-  const cv = await loadOpenCv();
-  if (!cv) {
-    return {
-      blob: null as Blob | null,
-      width: null as number | null,
-      height: null as number | null,
-      confidence: null as number | null,
-    };
-  }
-
-  const { canvas } = await fileToCanvas(file, 1400);
-  const src = cv.imread(canvas);
-  const gray = new cv.Mat();
-  const blurred = new cv.Mat();
-  const edged = new cv.Mat();
-  const contours = new cv.MatVector();
-  const hierarchy = new cv.Mat();
-
+export async function decodeQrText(file: File, context?: ProcessingContext) {
+  const startedAt = performance.now();
+  logTelemetry("qr:start", { size: file.size, mime: file.type, ...context });
   try {
-    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-    cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0);
-    cv.Canny(blurred, edged, 75, 200);
-    cv.findContours(edged, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
-
-    let best: { contour: CvType; area: number; approx: CvType } | null = null;
-
-    for (let i = 0; i < contours.size(); i += 1) {
-      const contour = contours.get(i);
-      const perimeter = cv.arcLength(contour, true);
-      const approx = new cv.Mat();
-      cv.approxPolyDP(contour, approx, 0.02 * perimeter, true);
-      if (approx.rows === 4) {
-        const area = cv.contourArea(approx);
-        if (!best || area > best.area) {
-          if (best) {
-            best.approx.delete();
-          }
-          best = { contour, area, approx };
-        } else {
-          approx.delete();
-        }
-      } else {
-        approx.delete();
-      }
-    }
-
-    if (!best) {
-      return {
-        blob: null,
-        width: null,
-        height: null,
-        confidence: null,
-      };
-    }
-
-    const points: Array<{ x: number; y: number }> = [];
-    for (let i = 0; i < 4; i += 1) {
-      const x = best.approx.data32S[i * 2];
-      const y = best.approx.data32S[i * 2 + 1];
-      points.push({ x, y });
-    }
-
-    const [tl, tr, br, bl] = orderPoints(points);
-    const widthA = distance(br, bl);
-    const widthB = distance(tr, tl);
-    const maxWidth = Math.max(widthA, widthB);
-    const heightA = distance(tr, br);
-    const heightB = distance(tl, bl);
-    const maxHeight = Math.max(heightA, heightB);
-
-    const srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
-      tl.x,
-      tl.y,
-      tr.x,
-      tr.y,
-      br.x,
-      br.y,
-      bl.x,
-      bl.y,
-    ]);
-    const dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
-      0,
-      0,
-      maxWidth - 1,
-      0,
-      maxWidth - 1,
-      maxHeight - 1,
-      0,
-      maxHeight - 1,
-    ]);
-
-    const transform = cv.getPerspectiveTransform(srcTri, dstTri);
-    const warped = new cv.Mat();
-    const dsize = new cv.Size(Math.round(maxWidth), Math.round(maxHeight));
-    cv.warpPerspective(src, warped, transform, dsize, cv.INTER_LINEAR, cv.BORDER_REPLICATE);
-
-    const outputCanvas = document.createElement("canvas");
-    outputCanvas.width = warped.cols;
-    outputCanvas.height = warped.rows;
-    cv.imshow(outputCanvas, warped);
-
-    const blob = await canvasToBlob(outputCanvas);
-
-    best.approx.delete();
-    srcTri.delete();
-    dstTri.delete();
-    transform.delete();
-    warped.delete();
-
-    const confidence = Math.min(1, best.area / (src.rows * src.cols));
-
-    return {
-      blob,
-      width: outputCanvas.width,
-      height: outputCanvas.height,
-      confidence,
-    };
-  } finally {
-    src.delete();
-    gray.delete();
-    blurred.delete();
-    edged.delete();
-    contours.delete();
-    hierarchy.delete();
+    const { canvas, ctx } = await fileToCanvas(file, 900);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const result = jsQR(imageData.data, canvas.width, canvas.height);
+    logTelemetry("qr:done", {
+      found: Boolean(result?.data),
+      duration_ms: Math.round(performance.now() - startedAt),
+      ...context,
+    });
+    return result?.data ?? null;
+  } catch (error) {
+    logTelemetry("qr:error", {
+      message: error instanceof Error ? error.message : "unknown error",
+      duration_ms: Math.round(performance.now() - startedAt),
+      ...context,
+    });
+    throw error;
   }
+}
+
+export async function cropVisitCard(
+  file: File,
+  context?: ProcessingContext,
+): Promise<CropResult> {
+  const worker = await getCropWorker();
+  if (!worker) {
+    logTelemetry("crop:worker_unavailable", { ...context });
+    return { blob: null, width: null, height: null, confidence: null };
+  }
+
+  const requestId = (cropWorkerRequestId += 1);
+  const buffer = await file.arrayBuffer();
+  logTelemetry("crop:worker_request", {
+    id: requestId,
+    size: file.size,
+    mime: file.type,
+    ...context,
+  });
+
+  return await new Promise<CropResult>((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      cropWorkerPending.delete(requestId);
+      logTelemetry("crop:worker_timeout", { id: requestId, ...context });
+      resolve({ blob: null, width: null, height: null, confidence: null });
+    }, WORKER_TIMEOUT_MS);
+
+    cropWorkerPending.set(requestId, {
+      resolve,
+      reject,
+      timeoutId,
+      context,
+    });
+
+    try {
+      worker.postMessage(
+        {
+          type: "crop",
+          id: requestId,
+          buffer,
+          mime: file.type,
+          side: context?.side,
+          opencvUrl: getWorkerOpenCvUrl(),
+        },
+        [buffer],
+      );
+    } catch (error) {
+      window.clearTimeout(timeoutId);
+      cropWorkerPending.delete(requestId);
+      const message =
+        error instanceof Error ? error.message : "Worker postMessage failed";
+      logTelemetry("crop:worker_post_error", { message, ...context });
+      reject(new Error(message));
+    }
+  });
 }

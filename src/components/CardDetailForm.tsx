@@ -2,15 +2,24 @@
 
 import { useState } from "react";
 import DeleteCardButton from "@/components/DeleteCardButton";
+import OcrSelectionPanel from "@/components/OcrSelectionPanel";
 import type { ContactValue, ExtractedContact, LabeledValue } from "@/lib/types";
-import { toLabeledList } from "@/lib/extract/contact";
+import { extractContactFromText, toLabeledList } from "@/lib/extract/contact";
+import { mergeContacts } from "@/lib/extract/merge";
 
 export default function CardDetailForm({
   cardId,
   initial,
+  images,
 }: {
   cardId: string;
   initial: ExtractedContact;
+  images?: Array<{
+    label: string;
+    side: "front" | "back";
+    signedUrl: string | null;
+    rawOcr?: unknown | null;
+  }>;
 }) {
   const [form, setForm] = useState<ExtractedContact>(initial);
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">(
@@ -19,6 +28,20 @@ export default function CardDetailForm({
   const [rerunStatus, setRerunStatus] = useState<"idle" | "running" | "error">(
     "idle",
   );
+  const [activeDropTarget, setActiveDropTarget] = useState<DropTarget | null>(
+    null,
+  );
+
+  type DropTarget =
+    | "name"
+    | "company"
+    | "title"
+    | "emails"
+    | "phones"
+    | "faxes"
+    | "websites"
+    | "address"
+    | "notes";
 
   const updateField = (key: keyof ExtractedContact, value: string) => {
     setForm((prev) => ({
@@ -81,6 +104,111 @@ export default function CardDetailForm({
       address: parseLabeled(lines.join("\n")),
     }));
   };
+
+  const normalizeDropText = (value: string) => value.replace(/\s+/g, " ").trim();
+
+  const extractDropItems = (value: string) => {
+    return value
+      .split(/[\s,;]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  };
+
+  const dedupeStrings = (items: string[]) => Array.from(new Set(items));
+
+  const dedupeLabeled = (items: LabeledValue[]) => {
+    const seen = new Set<string>();
+    return items.filter((item) => {
+      const key = `${item.label ?? ""}:${item.value}`.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
+  const applyDropText = (target: DropTarget, rawText: string) => {
+    const text = normalizeDropText(rawText);
+    if (!text) return;
+
+    setForm((prev) => {
+      if (target === "name" || target === "company" || target === "title") {
+        return { ...prev, [target]: text };
+      }
+
+      if (target === "emails" || target === "websites") {
+        const items = extractDropItems(text);
+        const current = target === "emails" ? prev.emails ?? [] : prev.websites ?? [];
+        const merged = dedupeStrings([...current, ...items]);
+        return { ...prev, [target]: merged };
+      }
+
+      if (target === "phones" || target === "faxes") {
+        const current = toLabeledList(
+          target === "phones" ? prev.phones : prev.faxes,
+        );
+        const incoming = parseLabeled(text);
+        const merged = dedupeLabeled([...current, ...incoming]);
+        return { ...prev, [target]: merged };
+      }
+
+      if (target === "address") {
+        const current = toLabeledList(prev.address);
+        const merged = dedupeLabeled([...current, { value: text }]);
+        return { ...prev, address: merged };
+      }
+
+      if (target === "notes") {
+        const existing = prev.notes?.trim();
+        const next = existing ? `${existing}\n${text}` : text;
+        return { ...prev, notes: next };
+      }
+
+      return prev;
+    });
+  };
+
+  const handleDrop =
+    (target: DropTarget) => (event: React.DragEvent<HTMLElement>) => {
+      event.preventDefault();
+      const text =
+        event.dataTransfer.getData("application/x-ocr-text") ||
+        event.dataTransfer.getData("text/plain");
+      if (!text) return;
+      applyDropText(target, text);
+    };
+
+  const handleDragOver = (event: React.DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  };
+
+  const handleActivateTarget = (target: DropTarget) => {
+    setActiveDropTarget(target);
+  };
+
+  const applySelectionText = (text: string) => {
+    const extracted = extractContactFromText(text);
+    setForm((prev) => mergeContacts(extracted, prev));
+  };
+
+  const applySelectionToActiveTarget = (text: string) => {
+    if (!activeDropTarget) return;
+    applyDropText(activeDropTarget, text);
+  };
+
+  const activeTargetLabel = activeDropTarget
+    ? {
+        name: "Name",
+        company: "Company",
+        title: "Title",
+        emails: "Email(s)",
+        phones: "Phone(s)",
+        faxes: "Fax(es)",
+        websites: "Website(s)",
+        address: "Address",
+        notes: "Notes",
+      }[activeDropTarget]
+    : null;
 
   const handleSave = async () => {
     setStatus("saving");
@@ -156,13 +284,37 @@ export default function CardDetailForm({
         </div>
       </div>
 
+      {images && images.length > 0 ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          {images.map((image) => (
+            <OcrSelectionPanel
+              key={image.side}
+              label={image.label}
+              imageUrl={image.signedUrl}
+              rawOcr={image.rawOcr ?? null}
+              onApplySelection={applySelectionText}
+              activeTargetLabel={activeTargetLabel}
+              onApplyToActiveTarget={applySelectionToActiveTarget}
+            />
+          ))}
+        </div>
+      ) : null}
+
       <div className="grid gap-4 md:grid-cols-2">
         <label className="grid gap-1 text-sm">
           Name
           <input
             value={form.name ?? ""}
             onChange={(event) => updateField("name", event.target.value)}
-            className="rounded-xl border border-ink-200/70 bg-sand-50 px-3 py-2"
+            onDragOver={handleDragOver}
+            onDrop={handleDrop("name")}
+            onClick={() => handleActivateTarget("name")}
+            onFocus={() => handleActivateTarget("name")}
+            className={`rounded-xl border bg-sand-50 px-3 py-2 ${
+              activeDropTarget === "name"
+                ? "border-ink-800 ring-2 ring-ink-200"
+                : "border-ink-200/70"
+            }`}
           />
         </label>
         <label className="grid gap-1 text-sm">
@@ -170,7 +322,15 @@ export default function CardDetailForm({
           <input
             value={form.company ?? ""}
             onChange={(event) => updateField("company", event.target.value)}
-            className="rounded-xl border border-ink-200/70 bg-sand-50 px-3 py-2"
+            onDragOver={handleDragOver}
+            onDrop={handleDrop("company")}
+            onClick={() => handleActivateTarget("company")}
+            onFocus={() => handleActivateTarget("company")}
+            className={`rounded-xl border bg-sand-50 px-3 py-2 ${
+              activeDropTarget === "company"
+                ? "border-ink-800 ring-2 ring-ink-200"
+                : "border-ink-200/70"
+            }`}
           />
         </label>
         <label className="grid gap-1 text-sm">
@@ -178,7 +338,15 @@ export default function CardDetailForm({
           <input
             value={form.title ?? ""}
             onChange={(event) => updateField("title", event.target.value)}
-            className="rounded-xl border border-ink-200/70 bg-sand-50 px-3 py-2"
+            onDragOver={handleDragOver}
+            onDrop={handleDrop("title")}
+            onClick={() => handleActivateTarget("title")}
+            onFocus={() => handleActivateTarget("title")}
+            className={`rounded-xl border bg-sand-50 px-3 py-2 ${
+              activeDropTarget === "title"
+                ? "border-ink-800 ring-2 ring-ink-200"
+                : "border-ink-200/70"
+            }`}
           />
         </label>
         <label className="grid gap-1 text-sm">
@@ -186,7 +354,15 @@ export default function CardDetailForm({
           <input
             value={form.emails?.join(", ") ?? ""}
             onChange={(event) => updateList("emails", event.target.value)}
-            className="rounded-xl border border-ink-200/70 bg-sand-50 px-3 py-2"
+            onDragOver={handleDragOver}
+            onDrop={handleDrop("emails")}
+            onClick={() => handleActivateTarget("emails")}
+            onFocus={() => handleActivateTarget("emails")}
+            className={`rounded-xl border bg-sand-50 px-3 py-2 ${
+              activeDropTarget === "emails"
+                ? "border-ink-800 ring-2 ring-ink-200"
+                : "border-ink-200/70"
+            }`}
           />
         </label>
         <label className="grid gap-1 text-sm">
@@ -194,7 +370,15 @@ export default function CardDetailForm({
           <textarea
             value={serializeLabeled(toLabeledList(form.phones))}
             onChange={(event) => updatePhones(event.target.value)}
-            className="min-h-[90px] rounded-xl border border-ink-200/70 bg-sand-50 px-3 py-2"
+            onDragOver={handleDragOver}
+            onDrop={handleDrop("phones")}
+            onClick={() => handleActivateTarget("phones")}
+            onFocus={() => handleActivateTarget("phones")}
+            className={`min-h-[90px] rounded-xl border bg-sand-50 px-3 py-2 ${
+              activeDropTarget === "phones"
+                ? "border-ink-800 ring-2 ring-ink-200"
+                : "border-ink-200/70"
+            }`}
           />
         </label>
         <label className="grid gap-1 text-sm">
@@ -202,7 +386,15 @@ export default function CardDetailForm({
           <textarea
             value={serializeLabeled(toLabeledList(form.faxes))}
             onChange={(event) => updateFaxes(event.target.value)}
-            className="min-h-[90px] rounded-xl border border-ink-200/70 bg-sand-50 px-3 py-2"
+            onDragOver={handleDragOver}
+            onDrop={handleDrop("faxes")}
+            onClick={() => handleActivateTarget("faxes")}
+            onFocus={() => handleActivateTarget("faxes")}
+            className={`min-h-[90px] rounded-xl border bg-sand-50 px-3 py-2 ${
+              activeDropTarget === "faxes"
+                ? "border-ink-800 ring-2 ring-ink-200"
+                : "border-ink-200/70"
+            }`}
           />
         </label>
         <label className="grid gap-1 text-sm">
@@ -210,7 +402,15 @@ export default function CardDetailForm({
           <input
             value={form.websites?.join(", ") ?? ""}
             onChange={(event) => updateList("websites", event.target.value)}
-            className="rounded-xl border border-ink-200/70 bg-sand-50 px-3 py-2"
+            onDragOver={handleDragOver}
+            onDrop={handleDrop("websites")}
+            onClick={() => handleActivateTarget("websites")}
+            onFocus={() => handleActivateTarget("websites")}
+            className={`rounded-xl border bg-sand-50 px-3 py-2 ${
+              activeDropTarget === "websites"
+                ? "border-ink-800 ring-2 ring-ink-200"
+                : "border-ink-200/70"
+            }`}
           />
         </label>
         <label className="grid gap-1 text-sm md:col-span-2">
@@ -218,7 +418,15 @@ export default function CardDetailForm({
           <textarea
             value={serializeLabeled(toLabeledList(form.address))}
             onChange={(event) => updateAddress(event.target.value)}
-            className="min-h-[90px] rounded-xl border border-ink-200/70 bg-sand-50 px-3 py-2"
+            onDragOver={handleDragOver}
+            onDrop={handleDrop("address")}
+            onClick={() => handleActivateTarget("address")}
+            onFocus={() => handleActivateTarget("address")}
+            className={`min-h-[90px] rounded-xl border bg-sand-50 px-3 py-2 ${
+              activeDropTarget === "address"
+                ? "border-ink-800 ring-2 ring-ink-200"
+                : "border-ink-200/70"
+            }`}
           />
         </label>
         <label className="grid gap-1 text-sm md:col-span-2">
@@ -226,7 +434,15 @@ export default function CardDetailForm({
           <textarea
             value={form.notes ?? ""}
             onChange={(event) => updateField("notes", event.target.value)}
-            className="min-h-[120px] rounded-xl border border-ink-200/70 bg-sand-50 px-3 py-2"
+            onDragOver={handleDragOver}
+            onDrop={handleDrop("notes")}
+            onClick={() => handleActivateTarget("notes")}
+            onFocus={() => handleActivateTarget("notes")}
+            className={`min-h-[120px] rounded-xl border bg-sand-50 px-3 py-2 ${
+              activeDropTarget === "notes"
+                ? "border-ink-800 ring-2 ring-ink-200"
+                : "border-ink-200/70"
+            }`}
           />
         </label>
       </div>

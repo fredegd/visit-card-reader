@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import { cropVisitCard, decodeQrText } from "@/lib/image-processing";
+import { cropVisitCard, decodeQrText, logTelemetry } from "@/lib/image-processing";
 
 type UploadFile = {
   file: File | null;
@@ -160,6 +160,12 @@ export default function UploadCardForm() {
     file: File,
     side: "front" | "back",
   ): Promise<PreparedImage> => {
+    logTelemetry("prepare:start", {
+      side,
+      size: file.size,
+      mime: file.type,
+      enhanced,
+    });
     let qrText: string | null = null;
     let crop = {
       blob: null as Blob | null,
@@ -179,7 +185,7 @@ export default function UploadCardForm() {
       };
 
       try {
-        const qrResult = await withTimeout(decodeQrText(file), 2000);
+        const qrResult = await withTimeout(decodeQrText(file, { side }), 2000);
         qrText = typeof qrResult === "string" ? qrResult : null;
       } catch {
         qrText = null;
@@ -187,7 +193,7 @@ export default function UploadCardForm() {
 
       if (enhanced) {
         try {
-          const cropResult = await withTimeout(cropVisitCard(file), 2500);
+          const cropResult = await withTimeout(cropVisitCard(file, { side }), 2500);
           if (cropResult) {
             crop = cropResult;
           }
@@ -200,6 +206,8 @@ export default function UploadCardForm() {
           };
         }
       }
+    } else {
+      logTelemetry("prepare:skip_large", { side, size: file.size });
     }
 
     const originalMeta = await uploadImage(file, side, "original");
@@ -344,7 +352,7 @@ export default function UploadCardForm() {
           onChange={(event) => setEnhanced(event.target.checked)}
           className="h-4 w-4 rounded border border-ink-300"
         />
-        Enable enhanced crop + QR scan (slower, may be unstable on some devices)
+        Enhanced crop (uses OpenCV)
       </label>
 
       {message ? (

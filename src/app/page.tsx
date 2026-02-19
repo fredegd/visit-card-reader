@@ -35,12 +35,14 @@ export default async function Home() {
                 Get started
               </Link>
             )}
-            <Link
-              href="/dashboard"
-              className="rounded-full border border-ink-200/70 px-6 py-3 text-sm font-semibold text-ink-700"
-            >
-              Go to dashboard
-            </Link>
+            {data.user ? (
+              <Link
+                href="/dashboard"
+                className="rounded-full border border-ink-200/70 px-6 py-3 text-sm font-semibold text-ink-700"
+              >
+                Go to dashboard
+              </Link>
+            ) : null}
           </div>
         </div>
 

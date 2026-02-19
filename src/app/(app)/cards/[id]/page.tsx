@@ -80,42 +80,44 @@ export default async function CardDetailPage({
         </div>
       </header>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        {[
-          {
-            label: "Front",
-            image: frontImage,
-            signedUrl: frontSigned.data?.signedUrl ?? null,
-          },
-          {
-            label: "Back",
-            image: backImage,
-            signedUrl: backSigned.data?.signedUrl ?? null,
-          },
-        ].map(({ label, image, signedUrl }) => (
-          <div
-            key={label}
-            className="rounded-3xl border border-ink-200/70 bg-white/80 p-4 shadow-soft"
-          >
-            <p className="text-sm font-semibold text-ink-700">{label}</p>
-            {image ? (
-              signedUrl ? (
-                <img
-                  src={signedUrl}
-                  alt={`${label} card`}
-                  className="mt-3 max-h-80 h-auto w-full rounded-2xl object-cover"
-                />
+      {card.status !== "ready" ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          {[
+            {
+              label: "Front",
+              image: frontImage,
+              signedUrl: frontSigned.data?.signedUrl ?? null,
+            },
+            {
+              label: "Back",
+              image: backImage,
+              signedUrl: backSigned.data?.signedUrl ?? null,
+            },
+          ].map(({ label, image, signedUrl }) => (
+            <div
+              key={label}
+              className="rounded-3xl border border-ink-200/70 bg-white/80 p-4 shadow-soft"
+            >
+              <p className="text-sm font-semibold text-ink-700">{label}</p>
+              {image ? (
+                signedUrl ? (
+                  <img
+                    src={signedUrl}
+                    alt={`${label} card`}
+                    className="mt-3 max-h-80 h-auto w-full rounded-2xl object-cover"
+                  />
+                ) : (
+                  <p className="mt-2 text-xs text-ink-500">
+                    Signed URL unavailable
+                  </p>
+                )
               ) : (
-                <p className="mt-2 text-xs text-ink-500">
-                  Signed URL unavailable
-                </p>
-              )
-            ) : (
-              <p className="mt-2 text-xs text-ink-500">Not uploaded</p>
-            )}
-          </div>
-        ))}
-      </div>
+                <p className="mt-2 text-xs text-ink-500">Not uploaded</p>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       {card.status === "processing" || card.status === "uploaded" ? (
         <ProcessingPanel status={card.status} cardId={card.id} />
@@ -130,6 +132,26 @@ export default async function CardDetailPage({
         <CardDetailForm
           cardId={card.id}
           initial={(card.extracted_json as ExtractedContact) ?? placeholder}
+          images={[
+            {
+              label: "Front",
+              side: "front",
+              signedUrl: frontSigned.data?.signedUrl ?? null,
+              rawOcr:
+                card.raw_ocr && typeof card.raw_ocr === "object"
+                  ? (card.raw_ocr as { front?: unknown }).front ?? null
+                  : null,
+            },
+            {
+              label: "Back",
+              side: "back",
+              signedUrl: backSigned.data?.signedUrl ?? null,
+              rawOcr:
+                card.raw_ocr && typeof card.raw_ocr === "object"
+                  ? (card.raw_ocr as { back?: unknown }).back ?? null
+                  : null,
+            },
+          ]}
         />
       )}
     </div>
