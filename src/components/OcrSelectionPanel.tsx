@@ -255,26 +255,11 @@ export default function OcrSelectionPanel({
           ? { logger, workerPath, corePath, langPath }
           : { workerPath, corePath, langPath };
 
-        const maybeWorker = createWorker(
+        const worker = await createWorker(
           lang,
           undefined,
           options as unknown as Record<string, unknown>,
         );
-
-        const worker =
-          typeof (maybeWorker as Promise<unknown>).then === "function"
-            ? await maybeWorker
-            : (maybeWorker as {
-                load?: () => Promise<void>;
-                loadLanguage?: (value: string) => Promise<void>;
-                initialize?: (value: string) => Promise<void>;
-                recognize: (value: unknown) => Promise<{ data: unknown }>;
-                terminate?: () => Promise<void>;
-              });
-
-        if (worker.load) await worker.load();
-        if (worker.loadLanguage) await worker.loadLanguage(lang);
-        if (worker.initialize) await worker.initialize(lang);
 
         const { data } = await worker.recognize(ocrBlob);
         if (worker.terminate) await worker.terminate();
